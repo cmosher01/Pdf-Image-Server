@@ -1,0 +1,20 @@
+repositories {
+    mavenCentral()
+}
+
+apply plugin: 'java'
+apply plugin: 'application'
+
+dependencies {
+    implementation group: 'org.nanohttpd', name: 'nanohttpd', version: 'latest.integration'
+    implementation group: 'org.apache.pdfbox', name: 'pdfbox', version: 'latest.release'
+    implementation group: 'org.apache.pdfbox', name: 'pdfbox-tools', version: 'latest.release'
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: 'latest.release'
+
+    runtimeOnly group: 'org.slf4j', name: 'slf4j-simple', version: 'latest.release'
+}
+
+group = 'nu.mine.mosher'
+version = '1.0.0-SNAPSHOT'
+mainClassName = 'nu.mine.mosher.PdfImageServer'
+sourceCompatibility = targetCompatibility = JavaVersion.VERSION_1_9
