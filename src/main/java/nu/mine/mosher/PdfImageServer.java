@@ -33,8 +33,8 @@ class PdfImageServer {
     private static Path getCwd() {
         try {
             return Paths.get(System.getProperty("user.dir", "./")).toAbsolutePath().normalize().toRealPath();
-        } catch (final Throwable ignore) {
-            LOG.error("Cannot find current default directory.", ignore);
+        } catch (final Throwable e) {
+            LOG.error("Cannot find current default directory.", e);
             return null;
         }
     }
@@ -54,8 +54,8 @@ class PdfImageServer {
                     LOG.trace("Page number (zero-origin): {}", iPage);
                     final Path path = getPdfPath(session);
                     return newChunkedResponse(Response.Status.OK, "image/png", getImage(path, iPage));
-                } catch (final Throwable ignore) {
-                    LOG.error("Exception while processing request:", ignore);
+                } catch (final Throwable e) {
+                    LOG.error("Exception while processing request:", e);
                     return newFixedLengthResponse(Response.Status.UNSUPPORTED_MEDIA_TYPE, MIME_PLAINTEXT, "");
                 }
             }
@@ -139,7 +139,6 @@ class PdfImageServer {
                     LOG.trace("Page to be rotated this amount: {}\u00B0", page.getRotation());
 
                     final PDImageXObject img = (PDImageXObject) obj;
-                    img.getImage().
                     LOG.trace("Image dimensions: [{},{}]", img.getWidth(), img.getHeight());
                     return rotateImage(img.getImage(), page.getRotation()/90);
                 }
@@ -165,6 +164,7 @@ class PdfImageServer {
         if (rot == 1 || rot == 3) {
             dim = swapDim(dim);
         }
+
         final BufferedImage destImage = new BufferedImage(dim.width, dim.height, BufferedImage.TYPE_INT_ARGB);
         rotateImageInto(img, rot, destImage);
         return destImage;
@@ -173,6 +173,7 @@ class PdfImageServer {
     private static void rotateImageInto(final BufferedImage img, final int rot, final BufferedImage destImage) {
         final Graphics2D graphics = destImage.createGraphics();
         final AffineTransform transform = new AffineTransform();
+
         LOG.debug("Rotation quadrant (1-3 = 90,180,270): {}", rot);
         if (rot == 1) {
             transform.translate(img.getHeight(), 0);
@@ -182,6 +183,7 @@ class PdfImageServer {
             transform.translate(0, img.getWidth());
         }
         transform.quadrantRotate(rot);
+
         graphics.drawRenderedImage(img, transform);
         graphics.dispose();
     }
