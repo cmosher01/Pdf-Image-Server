@@ -17,4 +17,4 @@ dependencies {
 group = 'nu.mine.mosher'
 version = '1.0.0-SNAPSHOT'
 mainClassName = 'nu.mine.mosher.PdfImageServer'
-sourceCompatibility = targetCompatibility = JavaVersion.VERSION_1_9
+sourceCompatibility = targetCompatibility = JavaVersion.VERSION_1_8

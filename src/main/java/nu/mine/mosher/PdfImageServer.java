@@ -1,7 +1,8 @@
 package nu.mine.mosher;
 
 import fi.iki.elonen.NanoHTTPD;
-import java.awt.Graphics2D;
+
+import java.awt.*;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.*;
@@ -9,10 +10,10 @@ import java.nio.file.*;
 import java.util.Collections;
 import java.util.List;
 import javax.imageio.ImageIO;
-import javax.imageio.ImageWriter;
-import javax.imageio.spi.ImageWriterSpi;
+
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.*;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.graphics.PDXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.slf4j.Logger;
@@ -31,11 +32,7 @@ class PdfImageServer {
 
     private static Path getCwd() {
         try {
-            return Paths
-                .get(System.getProperty("user.dir", "./"))
-                .toAbsolutePath()
-                .normalize()
-                .toRealPath();
+            return Paths.get(System.getProperty("user.dir", "./")).toAbsolutePath().normalize().toRealPath();
         } catch (final Throwable ignore) {
             LOG.error("Cannot find current default directory.", ignore);
             return null;
@@ -56,7 +53,7 @@ class PdfImageServer {
                     final int iPage = getPageNumber(session);
                     LOG.trace("Page number (zero-origin): {}", iPage);
                     final Path path = getPdfPath(session);
-                    return newChunkedResponse(Response.Status.OK, "image/png", getImageFromPage(path, iPage));
+                    return newChunkedResponse(Response.Status.OK, "image/png", getImage(path, iPage));
                 } catch (final Throwable ignore) {
                     LOG.error("Exception while processing request:", ignore);
                     return newFixedLengthResponse(Response.Status.UNSUPPORTED_MEDIA_TYPE, MIME_PLAINTEXT, "");
@@ -69,9 +66,7 @@ class PdfImageServer {
     }
 
     private static int getPageNumber(final NanoHTTPD.IHTTPSession session) {
-        final List<String> ps = session
-            .getParameters()
-            .getOrDefault("page", Collections.singletonList("1"));
+        final List<String> ps = session.getParameters().getOrDefault("page", Collections.singletonList("1"));
         if (ps.isEmpty()) {
             LOG.warn("Empty page number.");
             return 0;
@@ -85,12 +80,9 @@ class PdfImageServer {
     }
 
     private static Path getPdfPath(final NanoHTTPD.IHTTPSession session) throws IOException {
-        final String uri = removeLeadingSlash(session.getUri());
+        final String uri = "./" + session.getUri();
         LOG.trace("Received request for URI: {}", uri);
-        final Path path = CWD
-            .resolve(Paths.get(uri))
-            .toAbsolutePath()
-            .normalize();
+        final Path path = CWD.resolve(Paths.get(uri)).toAbsolutePath().normalize();
         LOG.trace("Resolved: {} to: {}", uri, path.toString());
         final Path pathReal = path.toRealPath();
         LOG.trace("File exists: {}", pathReal.toString());
@@ -100,10 +92,7 @@ class PdfImageServer {
     }
 
     private static void verifyIsFile(final Path path) throws IOException {
-        if (!(
-            path
-                .toFile()
-                .isFile() && Files.isReadable(path))) {
+        if (!(path.toFile().isFile() && Files.isReadable(path))) {
             throw new IOException("File is not a file (or is not readable.");
         }
     }
@@ -114,55 +103,90 @@ class PdfImageServer {
         }
     }
 
-    private static String removeLeadingSlash(final String uri) {
-        return uri.startsWith("/") ? uri.substring(1) : uri;
+    private static InputStream getImage(final Path pathPdf, final int iPage) throws IOException {
+        final BufferedImage img = getImageFromPage(pathPdf, iPage);
+        final ByteArrayOutputStream buf = new ByteArrayOutputStream(128*1024);
+        LOG.trace("Begin generating PNG image...");
+        ImageIO.write(img, "png", buf);
+        buf.flush();
+        buf.close();
+        LOG.trace("Completed generating PNG image.");
+        return new ByteArrayInputStream(buf.toByteArray());
     }
 
-    private static InputStream getImageFromPage(final Path pathPdf, final int iPage) throws IOException {
-        final PipedInputStream in = new PipedInputStream();
-        final PipedOutputStream out = new PipedOutputStream(in);
-        new Thread(() -> writeImage(pathPdf, iPage, out)).start();
-        return in;
-    }
-
-    private static void writeImage(final Path pathPdf, final int iPage, final PipedOutputStream to) {
+    private static BufferedImage getImageFromPage(final Path pathPdf, final int iPage) throws IOException {
         try (final PDDocument doc = PDDocument.load(pathPdf.toFile())) {
+            LOG.trace("Loaded PDF document from: {}", pathPdf.toString());
             final int cPage = doc.getNumberOfPages();
             LOG.trace("Document has {} pages", cPage);
-            if (0 <= iPage && iPage < cPage) {
-                final PDPage page = doc.getPage(iPage);
-                final PDResources rsrs = page.getResources();
-                for (final COSName name : rsrs.getXObjectNames()) {
-                    final PDXObject obj = rsrs.getXObject(name);
-                    if (obj instanceof PDImageXObject) {
-                        final BufferedImage img = ((PDImageXObject) obj).getImage();
-                        final BufferedImage rot = page.getRotation()==0 ? img : rotateImage(img, page.getRotation());
-                        ImageIO.write(rot, "png", to);
-                    }
+            verifyPageInRange(iPage, cPage);
+            final PDPage page = doc.getPage(iPage);
+            final PDResources rsrs = page.getResources();
+            for (final COSName name : rsrs.getXObjectNames()) {
+                final PDXObject obj = rsrs.getXObject(name);
+                if (obj instanceof PDImageXObject) {
+                    LOG.trace("Found PD image: {}", name.getName());
+
+                    final PDRectangle media = page.getMediaBox();
+                    LOG.trace("Page media-box: {}", media);
+
+                    final PDRectangle art = page.getArtBox();
+                    LOG.trace("Page art-box: {}", art);
+
+                    final PDRectangle crop = page.getCropBox();
+                    LOG.trace("Page crop-box: {}", crop);
+
+                    LOG.trace("Page to be rotated this amount: {}\u00B0", page.getRotation());
+
+                    final PDImageXObject img = (PDImageXObject) obj;
+                    img.getImage().
+                    LOG.trace("Image dimensions: [{},{}]", img.getWidth(), img.getHeight());
+                    return rotateImage(img.getImage(), page.getRotation()/90);
                 }
-            } else {
-                LOG.error("Page number {} out of range 0 to {} (inclusive).", iPage, cPage - 1);
-                throw new IOException("Page number out of range.");
             }
-        } catch (final Throwable e) {
-            LOG.error("Error extracting image", e);
         }
-        ImageWriterSpi
+        LOG.warn("Could not find image on page {}.", iPage);
+        throw new IOException();
     }
 
-    private static BufferedImage rotateImage(BufferedImage sourceImage, double angle) {
-        // TODO fix rotation (need to swap width/height for rotation of 90 or 270)
-        // and simplify because we need to handle only 0, 90, 180, 270
-        int width = sourceImage.getWidth();
-        int height = sourceImage.getHeight();
-        BufferedImage destImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g2d = destImage.createGraphics();
+    private static void verifyPageInRange(final int iPage, final int cPage) {
+        if (!(0 <= iPage && iPage < cPage)) {
+            LOG.error("Page number {} out of range 1 to {} (inclusive).", iPage + 1, cPage);
+            throw new IndexOutOfBoundsException();
+        }
+    }
 
-        AffineTransform transform = new AffineTransform();
-        transform.rotate(angle / 180 * Math.PI, width / 2 , height / 2);
-        g2d.drawRenderedImage(sourceImage, transform);
+    private static BufferedImage rotateImage(final BufferedImage img, final int rot) {
+        if (rot == 0) {
+            return img;
+        }
 
-        g2d.dispose();
+        Dimension dim = new Dimension(img.getWidth(), img.getHeight());
+        if (rot == 1 || rot == 3) {
+            dim = swapDim(dim);
+        }
+        final BufferedImage destImage = new BufferedImage(dim.width, dim.height, BufferedImage.TYPE_INT_ARGB);
+        rotateImageInto(img, rot, destImage);
         return destImage;
+    }
+
+    private static void rotateImageInto(final BufferedImage img, final int rot, final BufferedImage destImage) {
+        final Graphics2D graphics = destImage.createGraphics();
+        final AffineTransform transform = new AffineTransform();
+        LOG.debug("Rotation quadrant (1-3 = 90,180,270): {}", rot);
+        if (rot == 1) {
+            transform.translate(img.getHeight(), 0);
+        } else if (rot == 2) {
+            transform.translate(img.getWidth(), img.getHeight());
+        } else if (rot == 3) {
+            transform.translate(0, img.getWidth());
+        }
+        transform.quadrantRotate(rot);
+        graphics.drawRenderedImage(img, transform);
+        graphics.dispose();
+    }
+
+    private static Dimension swapDim(final Dimension dim) {
+        return new Dimension(dim.height, dim.width);
     }
 }
