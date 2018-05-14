@@ -7,11 +7,12 @@ import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.*;
 import java.nio.file.*;
-import java.util.Collections;
+import java.util.*;
 import java.util.List;
 import javax.imageio.ImageIO;
 
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.graphics.PDXObject;
@@ -19,6 +20,7 @@ import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static fi.iki.elonen.NanoHTTPD.newChunkedResponse;
 import static java.lang.Runtime.getRuntime;
 
 class PdfImageServer {
@@ -53,7 +55,7 @@ class PdfImageServer {
                     final int iPage = getPageNumber(session);
                     LOG.trace("Page number (zero-origin): {}", iPage);
                     final Path path = getPdfPath(session);
-                    return newChunkedResponse(Response.Status.OK, "image/png", getImage(path, iPage));
+                    return getImage(path, iPage);
                 } catch (final Throwable e) {
                     LOG.error("Exception while processing request:", e);
                     return newFixedLengthResponse(Response.Status.UNSUPPORTED_MEDIA_TYPE, MIME_PLAINTEXT, "");
@@ -103,18 +105,7 @@ class PdfImageServer {
         }
     }
 
-    private static InputStream getImage(final Path pathPdf, final int iPage) throws IOException {
-        final BufferedImage img = getImageFromPage(pathPdf, iPage);
-        final ByteArrayOutputStream buf = new ByteArrayOutputStream(128*1024);
-        LOG.trace("Begin generating PNG image...");
-        ImageIO.write(img, "png", buf);
-        buf.flush();
-        buf.close();
-        LOG.trace("Completed generating PNG image.");
-        return new ByteArrayInputStream(buf.toByteArray());
-    }
-
-    private static BufferedImage getImageFromPage(final Path pathPdf, final int iPage) throws IOException {
+    private static NanoHTTPD.Response getImage(final Path pathPdf, final int iPage) throws IOException {
         try (final PDDocument doc = PDDocument.load(pathPdf.toFile())) {
             LOG.trace("Loaded PDF document from: {}", pathPdf.toString());
             final int cPage = doc.getNumberOfPages();
@@ -140,7 +131,26 @@ class PdfImageServer {
 
                     final PDImageXObject img = (PDImageXObject) obj;
                     LOG.trace("Image dimensions: [{},{}]", img.getWidth(), img.getHeight());
-                    return rotateImage(img.getImage(), page.getRotation()/90);
+                    LOG.trace("Image type: {}", img.getSuffix());
+                    LOG.trace("Image color space: {}", img.getColorSpace().getName());
+
+                    if (img.getSuffix().equalsIgnoreCase("JPG")) {
+                        final ByteArrayOutputStream buf = new ByteArrayOutputStream(128*1024);
+                        final InputStream stream = img.createInputStream(Arrays.asList(COSName.DCT_DECODE.getName(), COSName.DCT_DECODE_ABBREVIATION.getName()));
+                        IOUtils.copy(stream, buf);
+                        buf.flush();
+                        IOUtils.closeQuietly(buf);
+                        return newChunkedResponse(NanoHTTPD.Response.Status.OK, "image/jpeg", new ByteArrayInputStream(buf.toByteArray()));
+                    }
+
+                    final BufferedImage bufimg = rotateImage(img.getImage(), page.getRotation()/90);
+                    final ByteArrayOutputStream buf = new ByteArrayOutputStream(128*1024);
+                    LOG.trace("Begin generating PNG image...");
+                    ImageIO.write(bufimg, "png", buf);
+                    buf.flush();
+                    buf.close();
+                    LOG.trace("Completed generating PNG image.");
+                    return newChunkedResponse(NanoHTTPD.Response.Status.OK, "image/png", new ByteArrayInputStream(buf.toByteArray()));
                 }
             }
         }

@@ -6,4 +6,5 @@ This is an HTTP server that only reads PDF files, and serves images from individ
 This application is useful if you have a PDF file that can be treated as merely a container for images.
 The most useful format of the PDF file will be where each page simply has an image object as its contents.
 Then, given a URL with `page` query parameter as a page number, this application will serve the (first)
-image object from page number `page` as a `PNG`.
+image object from page number `page`. If the object is a JPG, it is returned as-is. Otherwise, it is
+rotated (if necessary) and converted to a PNG image.
